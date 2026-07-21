@@ -1,0 +1,163 @@
+CXMOD — Connection eXperience MODule
+=====================================
+v2.1.1 | Apache-2.0 - developed under Alcapacit.
+
+WHAT IT IS
+----------
+CXMOD is a compiled C system utility for Linux server network management.
+Like iproute2 or ethtool, it reads directly from /proc and /sys — no Python,
+no Ruby, no daemons, no runtime dependencies. A single statically-compilable
+binary you deploy to any Linux system.
+
+It diagnoses and fixes the networking bottlenecks that ship misconfigured in
+every stock Linux installation:
+
+  Problem                         Default Impact           CXMOD Fix
+  ─────────────────────────────── ──────────────────────   ──────────────────────
+  TCP buffer undersizing          Caps 1G @ 17 Mbit/s      tune --profile=*
+  conntrack table overflow        Silent packet drops       conntrack --fix
+  IRQ imbalance (all on CPU 0)    Single-CPU bottleneck     irq --balance
+  TIME_WAIT accumulation          Port starvation           tune (tw_reuse)
+  SYN backlog too small           Drops on traffic spikes   tune (max_syn_backlog)
+  Orphan socket accumulation      OOM kills                 sockstat + tune
+  IP fragmentation buildup        MTU mismatch drops        sockstat (diagnose)
+  LRO on bridges/routers          HOL blocking              offload --fix-lro
+  Settings reset on reboot        Manual work every boot    persist --profile=*
+  No unified diagnostics          Blind to all of above     diagnose / fix
+
+
+QUICK START
+-----------
+    tar -xzf CXMOD.tar.gz && cd cxmod
+    make
+    sudo ./cx fix              # Diagnose and fix everything automatically
+
+    # Or preview before applying:
+    sudo ./cx fix --dry-run    # Print every command first
+    sudo ./cx diagnose         # Full health check (47+ checks)
+
+    # Install system-wide:
+    sudo make install             # /usr/local/sbin/cxmod + man page
+
+
+BUILD
+-----
+Requirements:
+  - GCC or Clang with C99 support
+  - Linux kernel 3.10+ (RHEL 7 / Ubuntu 14.04 or newer)
+  - GNU make
+  Optional: ethtool (for offload subcommand)
+  Optional: iproute2 tc (for QoS subcommand)
+
+Build options:
+  make                            Build the binary
+  make check                      Run 35+ self-tests
+  make install                    Install to /usr/local/sbin/
+  make install PREFIX=/usr        Install to /usr/sbin/
+  make dist                       Create CXMOD.tar.gz
+  make deb                        Build .deb package (requires dpkg-deb)
+  make rpm                        Build .rpm package (requires rpmbuild)
+
+Configure script (optional — checks for compiler and tools):
+  ./configure --prefix=/usr/local
+  make
+
+
+SUBCOMMANDS
+-----------
+DIAGNOSTICS & REPAIR
+  cx diagnose                           Full health check (47+ checks)
+  cx fix [--dry-run]                    Fix everything in one shot
+  cx report [--json] [--output=FILE]   Diagnostic report file
+
+TUNING PROFILES
+  cx tune --profile=balanced            General-purpose servers
+  cx tune --profile=high_throughput     Bulk transfers, CDN, file servers
+  cx tune --profile=low_latency         VoIP, gaming, interactive SSH
+  cx tune --profile=satellite           High-RTT WAN, satellite links
+  cx tune --profile=hardened            Security-hardened servers
+  cx tune --list                        Show all profiles
+  cx tune --bdp 10000 20               BDP calculator (10Gbit, 20ms RTT)
+  cx tune --auto-bdp                    Auto-detect from NIC speed
+  cx tune --set KEY=VALUE              Set individual sysctl
+  cx tune --current                     Show current kernel values
+
+PERSISTENCE (survives reboots)
+  cx persist --profile=balanced        Write to /etc/sysctl.d/90-cxmod.conf
+  cx persist --show                     Show saved configuration
+  cx persist --remove                   Remove saved configuration
+
+CONNECTION TRACKING
+  cx conntrack                          Table usage and timeouts
+  cx conntrack --states                 TCP connection state breakdown
+  cx conntrack --fix                    Scale table, fix timeouts
+
+IRQ & PACKET STEERING
+  cx irq [--iface=IF]                  NIC IRQ distribution
+  cx irq --balance [--iface=IF]        Distribute IRQs round-robin
+  cx irq --rps [--iface=IF]            Enable RPS/XPS
+
+NIC OFFLOAD (requires ethtool)
+  cx offload [--iface=IF]              Show TSO/GSO/GRO/LRO status
+  cx offload --fix-lro                 Disable LRO on all interfaces
+  cx offload --set FEAT on|off         Toggle offload feature
+
+QOS TRAFFIC SHAPING (requires tc/iproute2)
+  cx qos --apply --iface=IF --bw=M    Apply 4-class HTB QoS
+  cx qos --remove --iface=IF           Remove QoS
+  cx qos --show [--iface=IF]           Show active qdiscs
+
+ROUTING
+  cx route                              Show routing table
+  cx route --add DST [via GW] [dev IF]
+  cx route --del DST
+
+STATISTICS
+  cx proto                              Protocol stats (/proc/net/snmp)
+  cx sockstat                           Socket & buffer pressure
+  cx iface [--iface=IF]                Interface statistics
+  cx monitor [--iface=IF] [--interval=ms]   Live throughput
+
+
+PROFILE DETAILS
+---------------
+balanced (default, safe for all servers):
+  rmem/wmem_max:         32 MiB    (was 4 MiB — leaves 1G link at 17%)
+  somaxconn:             4096      (was 128 — drops connections under load)
+  tcp_tw_reuse:          1         (was 0 — TIME_WAIT exhausts ports)
+  tcp_fin_timeout:       30s       (was 60s — stale sockets linger)
+  tcp_syncookies:        1         (SYN flood protection)
+  tcp_ecn:               1         (congestion signaling)
+  ip_local_port_range:   10240-65535  (55k ephemeral ports)
+
+high_throughput (CDN, file servers, bulk transfer):
+  rmem/wmem_max:         128 MiB   (for 10G * 100ms BDP)
+  congestion_control:    bbr       (delay-based vs loss-based)
+  somaxconn:             65535     (high connection rate)
+
+satellite (high-RTT WAN, intercontinental):
+  rmem/wmem_max:         256 MiB   (for 100Mbit * 600ms BDP)
+  congestion_control:    bbr
+  tcp_slow_start_after_idle: 0
+
+hardened (DMZ, public-facing, security):
+  tcp_timestamps:        0         (reduces fingerprinting)
+  tcp_fastopen:          0         (reduces attack surface)
+  rp_filter:             1         (strict reverse-path filtering)
+  icmp_echo_ignore_broadcasts: 1   (smurf protection)
+
+
+DESIGN DECISIONS
+----------------
+- Zero runtime dependencies: no libpcap, no libnetfilter, no Python
+- Reads /proc and /sys directly: same as ss(8), ip(8), ethtool(8)
+- C99 standard: compiles on RHEL 7+ (GCC 4.8+) through RHEL 10
+- -Wall -Wextra -Wpedantic: zero warnings in production build
+- Handles missing kernel features gracefully
+- All sysctl writes are atomic: safe on live production systems
+- --dry-run available for every operation that changes kernel state
+
+
+LICENSE
+-------
+Apache-2.0. See COPYING.

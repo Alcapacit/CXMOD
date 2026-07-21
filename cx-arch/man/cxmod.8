@@ -1,0 +1,260 @@
+.TH CXMOD 8 "2026-07-19" "cxmod 2.1.0" "System Administration"
+.SH NAME
+cxmod \- Connection eXperience MODule \- Linux server network diagnostics and tuning
+.SH SYNOPSIS
+.B cxmod
+.I subcommand
+.RI [ options ]
+.SH DESCRIPTION
+.B cxmod
+is a compiled C system utility that diagnoses and fixes the most common Linux
+kernel networking bottlenecks. Like
+.BR iproute2 (8)
+and
+.BR ethtool (8),
+it reads directly from
+.B /proc
+and
+.BR /sys \(em
+no Python, no daemons, no runtime dependencies.
+.PP
+It solves the problems that ship misconfigured in stock Linux installations:
+.TP
+\(bu TCP buffer undersizing cutting 1\~Gbit throughput by 80\(en98%
+.TP
+\(bu conntrack table overflow dropping packets silently
+.TP
+\(bu IRQ imbalance saturating CPU\~0 while all other cores idle
+.TP
+\(bu TIME_WAIT accumulation starving new outbound connections
+.TP
+\(bu SYN backlog overflow under traffic spikes
+.TP
+\(bu Orphan socket accumulation causing OOM kills
+.TP
+\(bu IP fragment queue buildup from MTU mismatch
+.TP
+\(bu LRO misconfiguration on bridges and routers
+.TP
+\(bu Settings reset to defaults on every reboot
+.TP
+\(bu No unified actionable diagnostics
+.SH SUBCOMMANDS
+.SS DIAGNOSTICS
+.TP
+.B diagnose
+Run the full network health check (47+ checks). Reports CRITICAL, WARN, and OK
+findings for TCP buffers, conntrack, TIME_WAIT, IRQ balance, SYN backlog,
+retransmit rate, interface drops, MTU consistency, TCP memory pressure, orphan
+sockets, IP fragmentation, and file descriptor limits. Exit code 1 if any
+CRITICAL issues are found.
+.TP
+.B fix " [\-\-dry\-run]"
+One-shot fix for all detected issues. Applies the balanced tuning profile, fixes
+conntrack, balances IRQs, enables RPS/XPS, disables LRO on all interfaces, and
+persists settings to
+.IR /etc/sysctl.d/90\-cxmod.conf .
+With
+.B \-\-dry\-run
+prints every command that would be executed without changing anything.
+.TP
+.B report " [\-\-output=\fIFILE\fR] [\-\-json]"
+Generate a full timestamped diagnostic report. With
+.B \-\-json
+outputs machine-readable JSON for monitoring pipelines.
+.SS TUNING
+.TP
+.BR "tune \-\-profile=" "\fIPROFILE\fR [\-\-dry\-run]"
+Apply a named tuning profile:
+.RS
+.TP
+.B balanced
+General-purpose. Increases TCP buffers to 32\~MiB, enables tw_reuse,
+syncookies, ECN, TCP fast open, sets somaxconn=4096.
+.TP
+.B high_throughput
+Bulk transfers, CDN. 128\~MiB buffers, BBR congestion control, backlog=65535.
+.TP
+.B low_latency
+VoIP, gaming, interactive SSH. Short keepalive and FIN_WAIT, minimal latency.
+.TP
+.B satellite
+High-RTT WAN (>100\~ms). 256\~MiB buffers, BBR, no slow-start-after-idle.
+.TP
+.B hardened
+Security-focused DMZ. No timestamps, no TFO, strict rp_filter, ICMP hardening.
+.RE
+.TP
+.B "tune \-\-list"
+List all profiles with descriptions.
+.TP
+.B "tune \-\-current"
+Show current kernel parameter values.
+.TP
+.BR "tune \-\-bdp " "\fIMbit\fR \fIms\fR"
+Calculate the optimal TCP socket buffer for the given bandwidth (Mbit/s) and
+RTT (ms) using BDP = bandwidth \(mu RTT.
+.TP
+.B "tune \-\-auto\-bdp"
+Auto-detect interface speeds from
+.I /sys/class/net/*/speed
+and compute recommended buffer sizes.
+.TP
+.BR "tune \-\-set " "\fIKEY\fR=\fIVALUE\fR"
+Set a single sysctl parameter.
+.SS PERSISTENCE
+.TP
+.BR "persist \-\-profile=" "\fIPROFILE\fR"
+Apply the named profile and write settings to
+.I /etc/sysctl.d/90\-cxmod.conf
+for reboot persistence.
+.TP
+.B "persist \-\-show"
+Display saved configuration.
+.TP
+.B "persist \-\-remove"
+Remove
+.IR /etc/sysctl.d/90\-cxmod.conf .
+.SS CONNECTION TRACKING
+.TP
+.B "conntrack [\-\-stats]"
+Show conntrack table usage.
+.TP
+.B "conntrack \-\-states"
+Show TCP connection state breakdown from
+.IR /proc/net/tcp .
+.TP
+.B "conntrack \-\-fix"
+Scale conntrack table to RAM fraction, reduce TCP established timeout.
+.SS IRQ AND PACKET STEERING
+.TP
+.B "irq [\-\-iface=\fINAME\fR]"
+Show NIC IRQ distribution across CPUs.
+.TP
+.B "irq \-\-balance [\-\-iface=\fINAME\fR]"
+Distribute IRQs round-robin across online CPUs via
+.IR /proc/irq/N/smp_affinity .
+.TP
+.B "irq \-\-rps [\-\-iface=\fINAME\fR]"
+Enable RPS and XPS packet steering via
+.I /sys/class/net/IF/queues/rx-N/rps_cpus
+and
+.IR xps_cpus .
+.SS NIC OFFLOAD
+.TP
+.B "offload [\-\-iface=\fINAME\fR]"
+Show TSO, GSO, GRO, LRO, checksum offload status. Requires
+.BR ethtool (8).
+.TP
+.B "offload \-\-fix\-lro [\-\-iface=\fINAME\fR]"
+Disable LRO (Large Receive Offload). Recommended on routers and bridges.
+.TP
+.B "offload \-\-set \fIFEATURE\fR on|off"
+Toggle a NIC offload feature via
+.BR "ethtool -K" .
+.SS QOS TRAFFIC SHAPING
+.TP
+.B "qos \-\-apply \-\-iface=\fINAME\fR \-\-bw=\fIMbit\fR"
+Apply a 4-class HTB QoS: SSH/DNS > HTTP/HTTPS > FTP/SFTP > bulk.
+.TP
+.B "qos \-\-remove \-\-iface=\fINAME\fR"
+Remove QoS from interface.
+.TP
+.B "qos \-\-show [\-\-iface=\fINAME\fR]"
+Show active qdiscs and classes.
+.SS ROUTING
+.TP
+.B "route [\-\-show]"
+Display kernel routing table from
+.IR /proc/net/route .
+.TP
+.B "route \-\-add \fIDEST\fR [via \fIGW\fR] [dev \fIIF\fR] [metric \fIM\fR]"
+Add a static route.
+.TP
+.B "route \-\-del \fIDEST\fR"
+Delete a route.
+.SS STATISTICS
+.TP
+.B proto
+Protocol statistics from
+.IR /proc/net/snmp .
+.TP
+.B sockstat
+Socket and buffer statistics from
+.IR /proc/net/sockstat .
+.TP
+.B "iface [\-\-iface=\fINAME\fR]"
+Interface statistics from
+.I /proc/net/dev
+and
+.IR /sys/class/net/* .
+.TP
+.B "monitor [\-\-iface=\fINAME\fR] [\-\-interval=\fIms\fR]"
+Live RX/TX throughput monitor (default interval: 1000\~ms).
+.SH OPTIONS
+.TP
+.B \-\-dry\-run
+Print commands without executing.
+.TP
+.B \-\-verbose
+Verbose output.
+.TP
+.B \-\-json
+JSON output (diagnose, report).
+.TP
+.B \-\-no\-color
+Disable ANSI colour.
+.TP
+.BI \-\-iface= NAME
+Target interface.
+.SH FILES
+.TP
+.I /etc/sysctl.d/90\-cxmod.conf
+Persistent sysctl settings written by
+.BR "cxmod persist" .
+.TP
+.I /proc/net/route
+Routing table.
+.TP
+.I /proc/net/sockstat
+Socket statistics.
+.TP
+.I /proc/net/snmp
+Protocol statistics.
+.TP
+.I /proc/net/dev
+Interface counters.
+.TP
+.I /proc/net/tcp
+TCP connection table.
+.TP
+.I /proc/irq/N/smp_affinity
+IRQ CPU affinity.
+.TP
+.I /sys/class/net/IF/queues/rx-N/rps_cpus
+RPS CPU mask.
+.SH EXAMPLES
+.nf
+sudo cx diagnose
+sudo cx fix
+sudo cx fix \-\-dry\-run
+sudo cx tune \-\-profile=high_throughput
+sudo cx persist \-\-profile=balanced
+cx tune \-\-bdp 10000 20
+cx tune \-\-auto\-bdp
+sudo cx conntrack \-\-fix
+sudo cx irq \-\-balance && sudo cx irq \-\-rps
+sudo cx qos \-\-apply \-\-iface=eth0 \-\-bw=1000
+cx report \-\-json \-\-output=/tmp/report.json
+cx monitor \-\-interval=500
+.fi
+.SH DIAGNOSTICS
+Exit code 0 if no CRITICAL findings, 1 otherwise.
+.SH LICENSE
+Apache-2.0.
+.SH SEE ALSO
+.BR sysctl (8),
+.BR ethtool (8),
+.BR tc (8),
+.BR ip (8),
+.BR ss (8)
