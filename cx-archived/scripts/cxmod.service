@@ -1,0 +1,27 @@
+[Unit]
+Description=CXMOD Network Tuning and Diagnostics
+Documentation=man:cxmod(8)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/local/sbin/cxmod diagnose --no-color
+ExecStart=/usr/local/sbin/cxmod tune --profile=balanced
+ExecStop=/bin/true
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=no
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+
+# Log to journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cxmod
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,49 @@
+CXMOD Installation
+==================
+
+REQUIREMENTS
+------------
+  - Linux kernel 3.10 or later
+  - gcc (or compatible C99 compiler)
+  - make
+  - Root access for install and tuning operations
+
+QUICK INSTALL
+-------------
+  tar -xzf CXMOD.tar.gz
+  cd cx-2.0.0
+  make
+  sudo make install
+
+  Or using the install script:
+  sudo ./scripts/install.sh
+
+CUSTOM PREFIX
+-------------
+  make
+  sudo make install PREFIX=/opt/cxmod
+
+  Installs to /opt/cxmod/sbin/cxmod
+
+PACKAGE BUILD (DESTDIR)
+-----------------------
+  make
+  make install DESTDIR=/tmp/staging PREFIX=/usr
+
+  Produces files under /tmp/staging for packaging.
+
+CROSS-COMPILE
+-------------
+  make CC=aarch64-linux-gnu-gcc    # ARM64
+  make CC=arm-linux-gnueabihf-gcc  # ARM32
+  make CC=riscv64-linux-gnu-gcc    # RISC-V
+  make CC=mips-linux-gnu-gcc       # MIPS
+
+UNINSTALL
+---------
+  sudo make uninstall
+
+VERIFY
+------
+  cx version
+  sudo cx diagnose
